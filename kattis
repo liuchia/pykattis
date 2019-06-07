@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+import argparse
+import configparser
+import difflib
+import io
+import os
+import re
+import requests, requests.exceptions
+import subprocess
+import sys
+import webbrowser
+import zipfile
+
+ANSI_RED = "\033[31m"
+ANSI_GREEN = "\033[32m"
+ANSI_YELLOW = "\033[33m"
+ANSI_BLUE = "\033[34m"
+ANSI_RESET = "\033[m"
+
+def declare(messages):
+	if type(messages) is str:
+		print(f"{ANSI_YELLOW}{messages}{ANSI_RESET}")
+	else:
+		for i in messages:
+			print(f"{ANSI_YELLOW}{i}{ANSI_RESET}")
+
+def say(messages):
+	if type(messages) is str:
+		messages = messages.splitlines()
+	for i in messages:
+		for j in i.splitlines():
+			print(f"\t{j}")
+
+def pester(messages):
+	if type(messages) is str:
+		messages = messages.splitlines()
+	for i in messages:
+		for j in i.splitlines():
+			print(f"\t{j}")
+
+def reset():
+	print("\033[F\033[K", end='')
+
+
+DEFAULT_CONFIG = '/usr/local/etc/kattisrc'
+HEADERS = {'User-Agent': 'kattis-cli-submit'}
+
+class ConfigError(Exception):
+	pass
+
+def getUrl(cfg, option, default):
+	if cfg.has_option('kattis', option):
+		return cfg.get('kattis', option)
+	else:
+		return 'https://%s/%s' % (cfg.get('kattis', 'hostname'), default)
+
+def getConfig():
+	cfg = configparser.ConfigParser()
+	if os.path.exists(DEFAULT_CONFIG):
+		cfg.read(DEFAULT_CONFIG)
+	if not cfg.read([os.path.join(os.getenv('HOME'), '.kattisrc'),
+					os.path.join(os.path.dirname(sys.argv[0]), '.kattisrc')]):
+		raise ConfigError('''\
+I failed to read in a config file from your home directory or from the
+same directory as this script. To download a .kattisrc file please visit
+https://<kattis>/download/kattisrc
+The file should look something like this:
+[user]
+username: yourusername
+token: *********
+[kattis]
+hostname: <kattis>
+loginurl: https://<kattis>/login
+submissionurl: https://<kattis>/submit
+submissionsurl: https://<kattis>/submissions''')
+	return cfg
+
+def login(loginUrl, username, password=None, token=None):
+	loginArgs = {'user': username, 'script': 'true'}
+	if password:
+		loginArgs['password'] = password
+	if token:
+		loginArgs['token'] = token
+	return requests.post(loginUrl, data=loginArgs, headers=HEADERS)
+
+def loginFromConfig(cfg):
+	username = cfg.get('user', 'username')
+	fields = ['password', 'token']
+	data = [None, None]
+	for i in range(2):
+		try:
+			data[i] = cfg.get('user', fields[i])
+		except configparser.NoOptionError:
+			pass
+	if all(v is None for v in data):
+		raise ConfigError('''\
+Your .kattisrc file appears corrupted. It must provide a token (or a
+KATTIS password).
+Please download a new .kattisrc file''')
+	loginUrl = getUrl(cfg, 'loginurl', 'login')
+	return login(loginUrl, username, data[0], data[1])
+
+def requestSubmit(submitUrl, cookies, problem, filename):
+	data = {'submit': 'true',
+			'submit_ctr': 2,
+			'language': 'Python 3',
+			'mainclass': '',
+			'problem': problem,
+			'tag': '',
+			'script': 'true'}
+	subFiles = []
+	with open(filename) as subFile:
+		subFiles.append(('sub_file[]',
+			(os.path.basename(filename), subFile.read(), 'application/octet-stream')))
+	return requests.post(submitUrl, data=data, files=subFiles, cookies=cookies, headers=HEADERS)
+
+def submit(problem, file):
+	try:
+		cfg = getConfig()
+	except ConfigError as exc:
+		pester(exc)
+		sys.exit(1)
+	try:
+		loginReply = loginFromConfig(cfg)
+	except ConfigError as exc:
+		pester(exc)
+		sys.exit(1)
+	except requests.exceptions.RequestException as err:
+		pester('Login connection failed:', err)
+		sys.exit(1)
+	if not loginReply.status_code == 200:
+		pester('Login failed.')
+		if loginReply.status_code == 403:
+			pester('Incorrect username or password/token (403)')
+		elif loginReply.status_code == 404:
+			pester('Incorrect login URL (404)')
+		else:
+			pester(f'Status code: {loginReply.status_code}')
+		sys.exit(1)
+	submitUrl = getUrl(cfg, 'submissionurl', 'submit')
+	try:
+		result = requestSubmit(submitUrl, loginReply.cookies, problem, file)
+	except requests.exceptions.RequestException as err:
+		pester('Submit connection failed:', err)
+		sys.exit(1)
+	if result.status_code != 200:
+		pester('Submission failed.')
+		if result.status_code == 403:
+			pester('Access denied (403)')
+		elif result.status_code == 404:
+			pester('Incorrect submit URL (404)')
+		else:
+			pester(f'Status code: {loginReply.status_code}')
+		sys.exit(1)
+	plainResult = result.content.decode('utf-8').replace('<br />', '\n')
+	say(plainResult)
+	#TODO: Poll for submission pass/fail
+
+def relativePath(path):
+	abspath = os.path.abspath(__file__)
+	dirname = os.path.dirname(abspath)
+	return os.path.join(dirname, path)
+
+def testProblem(problem):
+	folder = relativePath("problems")
+	problemDir = os.path.join(folder, problem)
+	script = os.path.join(problemDir, "solution.py")
+	if not os.path.exists(script):
+		pester(f"{problem}/solution.py doesn't exist")
+		return
+	testDir = os.path.join(problemDir, "tests")
+	if not os.path.exists(testDir):
+		pester(f"{problem}/tests/ doesn't exist")
+
+	testFiles = [t for t in os.listdir(testDir)
+					if os.path.isfile(os.path.join(testDir, t))]
+	inputs = {}
+	outputs = {}
+	for filename in testFiles:
+		parts = filename.split(".")
+		head = ".".join(parts[:-1])
+		if parts[-1] == "in":
+			inputs[head] = os.path.join(testDir, filename)
+		elif parts[-1] == "ans":
+			outputs[head] = os.path.join(testDir, filename)
+	errors = []
+	numTests = len([x for x in inputs.items() if x in outputs])
+	testsDone = 0
+	progress = ""
+
+	say("Sample Tests: [" + ('.'*numTests) + "]")
+	for i, infile in inputs.items():
+		if i not in outputs:
+			continue
+		outfile = outputs[i]
+		process = subprocess.run(["python3", script],
+						capture_output=True,
+						stdin=open(infile))
+		out, err = process.stdout.decode("utf-8"), process.stderr.decode("utf-8")
+		if process.returncode != 0:
+			errors += [' ', f"FAIL: {infile}", '-'*(6+len(infile))]
+			errors.append(f"Nonzero exit code: {process.returncode}")
+			errors.append(f"stderr: {err}")
+			progress += f"{ANSI_RED}x{ANSI_RESET}"
+		else:
+			expected = open(outfile).read().splitlines(keepends=True)
+			actual = out.splitlines(keepends=True)
+			diff = list(difflib.Differ().compare(expected, actual))
+			if len(diff) == len(expected) and all([line.startswith("  ") for line in diff]):
+				progress += f"{ANSI_GREEN}={ANSI_RESET}"
+			else:
+				progress += f"{ANSI_RED}x{ANSI_RESET}"
+				errors += [' ', f"FAIL: {infile}", '-'*(5+len(infile))]
+				errors.append("Expected - but received +")
+				errors += diff
+		testsDone += 1
+		reset()
+		say("Sample Tests: [" + progress + ('.'*(numTests-testsDone)) + "]")
+	pester(errors)
+
+def setupProblemEnvironment(problem):
+	folder = relativePath("problems")
+	problemDir = os.path.join(folder, problem)
+	testDir = os.path.join(problemDir, "tests")
+	os.makedirs(testDir, exist_ok=True)
+	filename = os.path.join(problemDir, "solution.py")
+	if not os.path.exists(filename):
+		open(filename, 'w').close()
+		zipUrl = f"https://open.kattis.com/problems/{problem}/file/statement/samples.zip"
+		zipResponse = requests.get(zipUrl)
+		testData = zipfile.ZipFile(io.BytesIO(zipResponse.content))
+		testData.extractall(testDir)
+	return filename
+
+def openEditor(filename):
+	editor = os.environ.get("EDITOR", "vim")
+	subprocess.call([editor, filename])
+
+def main():
+	parser = argparse.ArgumentParser(description='Solve, test, submit Kattis problems.')
+	parser.add_argument('problem', nargs=1, help='Kattis problem id')
+	args = parser.parse_args()
+
+	problem = args.problem[0]
+	filename = setupProblemEnvironment(problem)
+
+	options = {'e': 'edit', 'b': 'boilerplate', 't': 'test', 's': 'submit', 'q': 'quit'}
+	optiontext = ", ".join([f"{k} => {v}" for k, v in options.items()])
+
+	while True:
+		print(f"{ANSI_BLUE}>> Input one of ({optiontext}):{ANSI_RESET} ", end='')
+		sys.stdout.flush()
+		try:
+			key = input().strip().lower()
+		except EOFError:
+			sys.exit()
+		reset()
+
+		if key not in options:
+			print(f"{ANSI_RED}invalid input:{ANSI_RESET} {key}")
+			continue
+
+		action = options[key]
+		if action == "quit":
+			declare("quit")
+			break
+		elif action == "edit":
+			declare(f"edit {filename}")
+			openEditor(filename)
+		elif action == "submit":
+			declare("submit")
+			submit(problem, filename)
+		elif action == "test":
+			declare(f"test {filename}")
+			testProblem(problem)
+			pass
+
+if __name__ == '__main__':
+	main()
