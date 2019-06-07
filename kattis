@@ -193,7 +193,7 @@ def testProblem(problem):
 		if i not in outputs:
 			continue
 		outfile = outputs[i]
-		process = subprocess.run(["python3", script],
+		process = subprocess.run([sys.executable, script],
 						capture_output=True,
 						stdin=open(infile))
 		out, err = process.stdout.decode("utf-8"), process.stderr.decode("utf-8")
