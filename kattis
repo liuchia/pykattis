@@ -8,6 +8,7 @@ import re
 import requests, requests.exceptions
 import subprocess
 import sys
+import time
 import webbrowser
 import zipfile
 
@@ -114,12 +115,13 @@ def requestSubmit(submitUrl, cookies, problem, filename):
 			(os.path.basename(filename), subFile.read(), 'application/octet-stream')))
 	return requests.post(submitUrl, data=data, files=subFiles, cookies=cookies, headers=HEADERS)
 
-def submit(problem, file):
+def getCookies():
 	try:
 		cfg = getConfig()
 	except ConfigError as exc:
 		pester(exc)
 		sys.exit(1)
+
 	try:
 		loginReply = loginFromConfig(cfg)
 	except ConfigError as exc:
@@ -130,31 +132,75 @@ def submit(problem, file):
 		sys.exit(1)
 	if not loginReply.status_code == 200:
 		pester('Login failed.')
-		if loginReply.status_code == 403:
-			pester('Incorrect username or password/token (403)')
-		elif loginReply.status_code == 404:
-			pester('Incorrect login URL (404)')
-		else:
-			pester(f'Status code: {loginReply.status_code}')
+		pester(f'Status code: {loginReply.status_code}')
 		sys.exit(1)
-	submitUrl = getUrl(cfg, 'submissionurl', 'submit')
+	return loginReply.cookies
+
+def submit(problem, file):
 	try:
-		result = requestSubmit(submitUrl, loginReply.cookies, problem, file)
+		cfg = getConfig()
+	except ConfigError as exc:
+		pester(exc)
+		sys.exit(1)
+
+	submitUrl = getUrl(cfg, 'submissionurl', 'submit')
+	cookies = getCookies()
+	try:
+		result = requestSubmit(submitUrl, cookies, problem, file)
 	except requests.exceptions.RequestException as err:
 		pester('Submit connection failed:', err)
 		sys.exit(1)
 	if result.status_code != 200:
 		pester('Submission failed.')
-		if result.status_code == 403:
-			pester('Access denied (403)')
-		elif result.status_code == 404:
-			pester('Incorrect submit URL (404)')
-		else:
-			pester(f'Status code: {loginReply.status_code}')
+		pester(f'Status code: {loginReply.status_code}')
 		sys.exit(1)
 	plainResult = result.content.decode('utf-8').replace('<br />', '\n')
 	say(plainResult)
-	#TODO: Poll for submission pass/fail
+	pollSubmitStatus(plainResult, cfg)
+
+def pollSubmitStatus(submitResponse, cfg):
+	pattern = r'data-type="status"><span class="([^"]+).*</i>([^<]+)'
+	correct = r'span class="accepted" title="Test case'
+	incorrect = r'span class="rejected" title="Test case'
+	unchecked = r'Test case \d+/\d+: not checked'
+
+	submissionUrl = getUrl(cfg, 'submissionsurl', 'submissions')
+	match = re.search(r'Submission ID: (\d+)', submitResponse)
+	if match:
+		id = match.group(1)
+		resultUrl = f"{submissionUrl}/{id}"
+		cookies = getCookies()
+		say("Kattis Tests: []")
+		while True:
+			try:
+				result = requests.get(resultUrl, cookies=cookies)
+			except requests.exceptions.RequestException as err:
+				pester('Result page request failed:', err)
+				sys.exit(1)
+			if result.status_code != 200:
+				pester('Result page request failed.')
+				pester(f'Status code: {result.status_code}')
+				sys.exit(1)
+			plainResult = result.content.decode('utf-8')
+			match2 = re.search(pattern, plainResult)
+			if match2:
+				correctAmount = len(re.findall(correct, plainResult))
+				incorrectAmount = len(re.findall(incorrect, plainResult))
+				uncheckedAmount = len(re.findall(unchecked, plainResult))
+				progress = f"{ANSI_GREEN}={ANSI_RESET}" * correctAmount
+				progress += f"{ANSI_RED}x{ANSI_RESET}" * incorrectAmount
+				progress += "." * uncheckedAmount
+				reset()
+				say(f"Kattis Tests: [{progress}]")
+
+				status1 = match2.group(1)
+				status2 = match2.group(2)
+				if status1 != 'other':
+					say(f"Result: {status2}")
+					break
+			else:
+				break
+			time.sleep(0.33)
 
 def relativePath(path):
 	abspath = os.path.abspath(__file__)
@@ -184,7 +230,7 @@ def testProblem(problem):
 		elif parts[-1] == "ans":
 			outputs[head] = os.path.join(testDir, filename)
 	errors = []
-	numTests = len([x for x in inputs.items() if x in outputs])
+	numTests = len([x for x in inputs.keys() if x in outputs])
 	testsDone = 0
 	progress = ""
 
@@ -215,7 +261,7 @@ def testProblem(problem):
 				errors += diff
 		testsDone += 1
 		reset()
-		say("Sample Tests: [" + progress + ('.'*(numTests-testsDone)) + "]")
+		say(f"Sample Tests: [" + progress + ('.'*(numTests-testsDone)) + "]")
 	pester(errors)
 
 def setupProblemEnvironment(problem):
