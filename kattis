@@ -280,9 +280,9 @@ def setupProblemEnvironment(problem):
 	folder = relativePath("problems")
 	problemDir = os.path.join(folder, problem)
 	testDir = os.path.join(problemDir, "tests")
-	os.makedirs(testDir, exist_ok=True)
 	filename = os.path.join(problemDir, f"solution.{LANG}")
 	if not os.path.exists(testDir):
+		os.makedirs(testDir, exist_ok=True)
 		open(filename, 'w').close()
 		zipUrl = f"https://open.kattis.com/problems/{problem}/file/statement/samples.zip"
 		zipResponse = requests.get(zipUrl)
