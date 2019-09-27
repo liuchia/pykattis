@@ -18,6 +18,11 @@ ANSI_YELLOW = "\033[33m"
 ANSI_BLUE = "\033[34m"
 ANSI_RESET = "\033[m"
 
+def relativePath(path):
+	abspath = os.path.abspath(__file__)
+	dirname = os.path.dirname(abspath)
+	return os.path.join(dirname, path)
+
 def declare(messages):
 	if type(messages) is str:
 		print(f"{ANSI_YELLOW}{messages}{ANSI_RESET}")
@@ -42,9 +47,18 @@ def pester(messages):
 def reset():
 	print("\033[F\033[K", end='')
 
+def lastLang():
+	langfile = relativePath(".lang")
+	if os.path.exists(langfile):
+		with open(langfile) as f:
+			return f.readline().strip()
+	return "py"
 
 DEFAULT_CONFIG = '/usr/local/etc/kattisrc'
 HEADERS = {'User-Agent': 'kattis-cli-submit'}
+EXTENSIONS = {'py': 'Python 3', 'rb': 'Ruby'}
+LANG = lastLang()
+INTERPRETER = {'py': 'python3', 'rb': 'ruby'}
 
 class ConfigError(Exception):
 	pass
@@ -102,9 +116,10 @@ Please download a new .kattisrc file''')
 	return login(loginUrl, username, data[0], data[1])
 
 def requestSubmit(submitUrl, cookies, problem, filename):
+	global LANG
 	data = {'submit': 'true',
 			'submit_ctr': 2,
-			'language': 'Python 3',
+			'language': EXTENSIONS[LANG],
 			'mainclass': '',
 			'problem': problem,
 			'tag': '',
@@ -202,17 +217,13 @@ def pollSubmitStatus(submitResponse, cfg):
 				break
 			time.sleep(0.33)
 
-def relativePath(path):
-	abspath = os.path.abspath(__file__)
-	dirname = os.path.dirname(abspath)
-	return os.path.join(dirname, path)
-
 def testProblem(problem):
+	global LANG
 	folder = relativePath("problems")
 	problemDir = os.path.join(folder, problem)
-	script = os.path.join(problemDir, "solution.py")
+	script = os.path.join(problemDir, f"solution.{LANG}")
 	if not os.path.exists(script):
-		pester(f"{problem}/solution.py doesn't exist")
+		pester(f"{problem}/solution.{LANG} doesn't exist")
 		return
 	testDir = os.path.join(problemDir, "tests")
 	if not os.path.exists(testDir):
@@ -239,7 +250,7 @@ def testProblem(problem):
 		if i not in outputs:
 			continue
 		outfile = outputs[i]
-		process = subprocess.run([sys.executable, script],
+		process = subprocess.run([INTERPRETER[LANG], script],
 						capture_output=True,
 						stdin=open(infile))
 		out, err = process.stdout.decode("utf-8"), process.stderr.decode("utf-8")
@@ -265,12 +276,13 @@ def testProblem(problem):
 	pester(errors)
 
 def setupProblemEnvironment(problem):
+	global LANG
 	folder = relativePath("problems")
 	problemDir = os.path.join(folder, problem)
 	testDir = os.path.join(problemDir, "tests")
 	os.makedirs(testDir, exist_ok=True)
-	filename = os.path.join(problemDir, "solution.py")
-	if not os.path.exists(filename):
+	filename = os.path.join(problemDir, f"solution.{LANG}")
+	if not os.path.exists(testDir):
 		open(filename, 'w').close()
 		zipUrl = f"https://open.kattis.com/problems/{problem}/file/statement/samples.zip"
 		zipResponse = requests.get(zipUrl)
@@ -283,6 +295,7 @@ def openEditor(filename):
 	subprocess.call([editor, filename])
 
 def main():
+	global LANG
 	parser = argparse.ArgumentParser(description='Solve, test, submit Kattis problems.')
 	parser.add_argument('problem', nargs=1, help='Kattis problem id')
 	args = parser.parse_args()
@@ -290,7 +303,7 @@ def main():
 	problem = args.problem[0]
 	filename = setupProblemEnvironment(problem)
 
-	options = {'e': 'edit', 'b': 'boilerplate', 't': 'test', 's': 'submit', 'q': 'quit'}
+	options = {'e': 'edit', 'b': 'boilerplate', 'l': 'language', 't': 'test', 's': 'submit', 'q': 'quit'}
 	optiontext = ", ".join([f"{k} => {v}" for k, v in options.items()])
 
 	while True:
@@ -313,6 +326,22 @@ def main():
 		elif action == "edit":
 			declare(f"edit {filename}")
 			openEditor(filename)
+		elif action == "language":
+			optionlang = ', '.join([k for k in EXTENSIONS])
+			print(f"{ANSI_BLUE}>> Input one of ({optionlang}):{ANSI_RESET} ", end='')
+			sys.stdout.flush()
+			choice = input().strip().lower()
+			if choice in EXTENSIONS:
+				LANG = choice
+				filename = setupProblemEnvironment(problem)
+				declare(f"lang {choice}")
+				langfile = relativePath(".lang")
+				with open(langfile, "w") as f:
+					f.write(choice)
+				f.close()
+			else:
+				print(f"{ANSI_RED}invalid input:{ANSI_RESET} {choice}")
+				sys.stdout.flush()
 		elif action == "submit":
 			declare("submit")
 			submit(problem, filename)

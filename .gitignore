@@ -1,4 +1,5 @@
 *.swp
+.lang
 *.pyc
 problems/*
 templates/*
