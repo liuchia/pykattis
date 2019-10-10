@@ -2,4 +2,3 @@
 .lang
 *.pyc
 problems/*
-templates/*

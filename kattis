@@ -298,12 +298,15 @@ def boilerplate(problem):
 	if choice in templates:
 		declare(f"boilerplate {choice}")
 		templateFile = os.path.join(templateFolder, choice + needed_extension)
-		originalText = None
-		templateText = None
+		originalText = ""
+		templateText = ""
 		with open(templateFile, 'r') as contents:
 			templateText = contents.read()
-		with open(filename, 'r') as contents:
-			originalText = contents.read()
+		try:
+			with open(filename, 'r') as contents:
+				originalText = contents.read()
+		except FileNotFoundError:
+			pass
 		with open(filename, 'w') as contents:
 			contents.write(templateText)
 			contents.write(originalText)
