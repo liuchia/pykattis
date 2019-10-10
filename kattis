@@ -6,6 +6,7 @@ import io
 import os
 import re
 import requests, requests.exceptions
+import shutil
 import subprocess
 import sys
 import time
@@ -58,7 +59,7 @@ DEFAULT_CONFIG = '/usr/local/etc/kattisrc'
 HEADERS = {'User-Agent': 'kattis-cli-submit'}
 EXTENSIONS = {'py': 'Python 3', 'rb': 'Ruby'}
 LANG = lastLang()
-INTERPRETER = {'py': 'python3', 'rb': 'ruby'}
+INTERPRETER = {'py': sys.executable, 'rb': 'ruby'}
 
 class ConfigError(Exception):
 	pass
@@ -275,6 +276,41 @@ def testProblem(problem):
 		say(f"Sample Tests: [" + progress + ('.'*(numTests-testsDone)) + "]")
 	pester(errors)
 
+def boilerplate(problem):
+	global LANG
+	folder = relativePath("problems")
+	problemDir = os.path.join(folder, problem)
+	filename = os.path.join(problemDir, f"solution.{LANG}")
+	templateFolder = relativePath(f"templates/{LANG}")
+	if not os.path.exists(templateFolder):
+		pester("No template folder found at: "+templateFolder)
+		return
+
+	needed_extension = f".{LANG}"
+	templates = [f[:-len(needed_extension)] for f in os.listdir(templateFolder)
+				if os.path.isfile(os.path.join(templateFolder, f))
+					and f.endswith(needed_extension)]
+
+	options = ', '.join([k for k in templates])
+	print(f"{ANSI_BLUE}>> Input one of ({options}):{ANSI_RESET} ", end='')
+	sys.stdout.flush()
+	choice = input().strip()
+	if choice in templates:
+		declare(f"boilerplate {choice}")
+		templateFile = os.path.join(templateFolder, choice + needed_extension)
+		originalText = None
+		templateText = None
+		with open(templateFile, 'r') as contents:
+			templateText = contents.read()
+		with open(filename, 'r') as contents:
+			originalText = contents.read()
+		with open(filename, 'w') as contents:
+			contents.write(templateText)
+			contents.write(originalText)
+	else:
+		print(f"{ANSI_RED}invalid input:{ANSI_RESET} {choice}")
+		sys.stdout.flush()
+
 def setupProblemEnvironment(problem):
 	global LANG
 	folder = relativePath("problems")
@@ -286,7 +322,12 @@ def setupProblemEnvironment(problem):
 		open(filename, 'w').close()
 		zipUrl = f"https://open.kattis.com/problems/{problem}/file/statement/samples.zip"
 		zipResponse = requests.get(zipUrl)
-		testData = zipfile.ZipFile(io.BytesIO(zipResponse.content))
+		try:
+			testData = zipfile.ZipFile(io.BytesIO(zipResponse.content))
+		except zipfile.BadZipFile:
+			pester("Problem not found.")
+			shutil.rmtree(problemDir)
+			sys.exit(1)
 		testData.extractall(testDir)
 	return filename
 
@@ -323,6 +364,8 @@ def main():
 		if action == "quit":
 			declare("quit")
 			break
+		elif action == "boilerplate":
+			boilerplate(problem)
 		elif action == "edit":
 			declare(f"edit {filename}")
 			openEditor(filename)
