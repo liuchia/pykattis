@@ -5,14 +5,11 @@ class UF:
 	def find(self, i):
 		if self.parent[i] == i:
 			return i
-		else:
-			self.parent[i] = self.find(self.parent[i])
-			return self.parent[i]
-	def connected(self, i, j):
-		return self.find(i) == self.find(j)
+		self.parent[i] = self.find(self.parent[i])
+		return self.parent[i]
 	def union(self, i, j):
-		if not self.connected(i, j):
-			x, y = self.find(i), self.find(j)
+		x, y = self.find(i), self.find(j)
+		if x != y:
 			if self.height[x] > self.height[y]:
 				self.parent[y] = x
 			else:
