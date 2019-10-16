@@ -144,7 +144,7 @@ def getCookies():
 		pester(exc)
 		sys.exit(1)
 	except requests.exceptions.RequestException as err:
-		pester('Login connection failed:', err)
+		pester(f'Login connection failed: {err}')
 		sys.exit(1)
 	if not loginReply.status_code == 200:
 		pester('Login failed.')
