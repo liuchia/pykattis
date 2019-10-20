@@ -8,10 +8,8 @@ def shortestAugmentingPath(C, A, F, s, t):
 		for v in A[u]:
 			if C[u][v] - F[u][v] > 0 and P[v] == -1:
 				P[v], M[v] = u, min(M[u], C[u][v] - F[u][v])
-				if v != t:
-					queue.append(v)
-				else:
-					return M[t], P
+				if v != t: queue.append(v)
+				else:      return M[t], P
 	return 0, P
 
 def EdmondsKarp(CapMatrix, AdjList, source, target):
@@ -19,8 +17,7 @@ def EdmondsKarp(CapMatrix, AdjList, source, target):
 	FlowMatrix = [[0 for i in range(length)] for j in range(length)]
 	while True:
 		bottle, Parent = shortestAugmentingPath(CapMatrix, AdjList, FlowMatrix, source, target)
-		if bottle == 0:
-			break
+		if bottle == 0: break
 		flow += bottle
 		v = target
 		while v != source:
