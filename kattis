@@ -57,9 +57,9 @@ def lastLang():
 
 DEFAULT_CONFIG = '/usr/local/etc/kattisrc'
 HEADERS = {'User-Agent': 'kattis-cli-submit'}
-EXTENSIONS = {'py': 'Python 3', 'rb': 'Ruby'}
+EXTENSIONS = {'py': 'Python 3', 'rb': 'Ruby', 'hs': 'Haskell'}
 LANG = lastLang()
-INTERPRETER = {'py': sys.executable, 'rb': 'ruby'}
+INTERPRETER = {'py': sys.executable, 'rb': 'ruby', 'hs': 'runhaskell'}
 
 class ConfigError(Exception):
 	pass
